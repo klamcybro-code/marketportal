@@ -4,3 +4,4 @@ telethon
 qrcode
 pillow
 gunicorn
+requests
